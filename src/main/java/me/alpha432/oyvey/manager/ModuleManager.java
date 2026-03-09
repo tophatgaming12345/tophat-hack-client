@@ -1,68 +1,170 @@
 package me.alpha432.oyvey.manager;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import me.alpha432.oyvey.OyVey;
+import me.alpha432.oyvey.event.impl.render.Render2DEvent;
+import me.alpha432.oyvey.event.impl.render.Render3DEvent;
+import me.alpha432.oyvey.features.Feature;
+import me.alpha432.oyvey.features.commands.ModuleCommand;
 import me.alpha432.oyvey.features.modules.Module;
+import me.alpha432.oyvey.features.modules.client.ClickGuiModule;
+import me.alpha432.oyvey.features.modules.client.HudEditorModule;
+import me.alpha432.oyvey.features.modules.client.NotificationsModule;
+import me.alpha432.oyvey.features.modules.combat.CriticalsModule;
+import me.alpha432.oyvey.features.modules.combat.KeyPearlModule;
+import me.alpha432.oyvey.features.modules.hud.CoordinatesHudModule;
+import me.alpha432.oyvey.features.modules.hud.WatermarkHudModule;
+import me.alpha432.oyvey.features.modules.misc.MCFModule;
+import me.alpha432.oyvey.features.modules.movement.ReverseStepModule;
+import me.alpha432.oyvey.features.modules.movement.StepModule;
+import me.alpha432.oyvey.features.modules.movement.SprintModule;
+import me.alpha432.oyvey.features.modules.movement.FlyModule;
+import me.alpha432.oyvey.features.modules.player.FastPlaceModule;
+import me.alpha432.oyvey.features.modules.player.NoFallModule;
+import me.alpha432.oyvey.features.modules.player.VelocityModule;
+import me.alpha432.oyvey.features.modules.render.BlockHighlightModule;
 import me.alpha432.oyvey.features.modules.render.ESPModule;
+import me.alpha432.oyvey.features.modules.render.TracersModule;
+import me.alpha432.oyvey.features.modules.combat.KillAuraModule;
+import me.alpha432.oyvey.features.modules.misc.AutoReconnectModule;
+import me.alpha432.oyvey.features.modules.client.HUDModule;
+import me.alpha432.oyvey.util.traits.Jsonable;
+import me.alpha432.oyvey.util.traits.Util;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
+import java.util.stream.Stream;
 
-public class ModuleManager {
+public class ModuleManager implements Jsonable, Util {
+    private static final Logger LOGGER = LoggerFactory.getLogger("ModuleManager");
 
+    private final Map<Class<? extends Module>, Module> fastRegistry = new HashMap<>();
     private final List<Module> modules = new ArrayList<>();
 
     public void init() {
-        // REGISTER MODULES HERE
+        // HUD Modules
+        register(new WatermarkHudModule());
+        register(new CoordinatesHudModule());
+        register(new HudEditorModule());
+        register(new ClickGuiModule());
+        register(new NotificationsModule());
+        register(new HUDModule());
 
-        register(new ESPModule());
+        // Combat Modules
+        register(new CriticalsModule());
+        register(new KeyPearlModule());
+        register(new KillAuraModule());
+
+        // Movement Modules
+        register(new StepModule());
+        register(new ReverseStepModule());
+        register(new SprintModule());
+        register(new FlyModule());
+
+        // Player Modules
+        register(new FastPlaceModule());
+        register(new VelocityModule());
+        register(new NoFallModule());
+
+        // Render Modules
+        register(new BlockHighlightModule());
+        register(new TracersModule());
+        register(new ESPModule()); // <-- Added your ESPModule
+
+        // Misc Modules
+        register(new MCFModule());
+        register(new AutoReconnectModule());
+
+        LOGGER.info("Registered {} modules", modules.size());
+
+        // Register commands for each module
+        for (Module module : modules) {
+            OyVey.commandManager.register(new ModuleCommand(module));
+        }
+
+        OyVey.configManager.addConfig(this);
     }
 
-    private void register(Module module) {
-        modules.add(module);
+    public void register(Module module) {
+        getModules().add(module);
+        fastRegistry.put(module.getClass(), module);
     }
 
     public List<Module> getModules() {
         return modules;
     }
 
-    public Module getModuleByName(String name) {
-        for (Module module : modules) {
-            if (module.getName().equalsIgnoreCase(name)) {
-                return module;
-            }
-        }
-        return null;
+    public Stream<Module> stream() {
+        return getModules().stream();
     }
 
+    @SuppressWarnings("unchecked")
     public <T extends Module> T getModuleByClass(Class<T> clazz) {
-        for (Module module : modules) {
-            if (clazz.isInstance(module)) {
-                return clazz.cast(module);
-            }
-        }
-        return null;
+        return (T) fastRegistry.get(clazz);
     }
 
-    public void onUpdate() {
-        for (Module module : modules) {
-            if (module.isEnabled()) {
-                module.onUpdate();
-            }
-        }
+    public Module getModuleByName(String name) {
+        return stream().filter(m -> m.getName().equalsIgnoreCase(name)).findFirst().orElse(null);
     }
 
-    public void onRender3D() {
-        for (Module module : modules) {
-            if (module.isEnabled()) {
-                module.onRender3D();
-            }
-        }
+    public Module getModuleByDisplayName(String display) {
+        return stream().filter(m -> m.getDisplayName().equalsIgnoreCase(display)).findFirst().orElse(null);
+    }
+
+    public List<Module> getModulesByCategory(Module.Category category) {
+        return stream().filter(m -> m.getCategory() == category).toList();
+    }
+
+    public List<Module.Category> getCategories() {
+        return Arrays.asList(Module.Category.values());
+    }
+
+    public void onLoad() {
+        getModules().forEach(Module::onLoad);
     }
 
     public void onTick() {
-        for (Module module : modules) {
-            if (module.isEnabled()) {
-                module.onTick();
-            }
+        stream().filter(Feature::isEnabled).forEach(Module::onTick);
+    }
+
+    public void onRender2D(Render2DEvent event) {
+        stream().filter(Feature::isEnabled).forEach(module -> module.onRender2D(event));
+    }
+
+    public void onRender3D(Render3DEvent event) {
+        stream().filter(Feature::isEnabled).forEach(module -> module.onRender3D(event));
+    }
+
+    public void onUnload() {
+        getModules().forEach(EVENT_BUS::unregister);
+        getModules().forEach(Module::onUnload);
+    }
+
+    public void onKeyPressed(int key) {
+        if (key <= 0 || mc.screen != null) return;
+        stream().filter(module -> module.getBind().getKey() == key).forEach(Module::toggle);
+    }
+
+    @Override
+    public JsonElement toJson() {
+        JsonObject object = new JsonObject();
+        for (Module module : getModules()) {
+            object.add(module.getName(), module.toJson());
         }
+        return object;
+    }
+
+    @Override
+    public void fromJson(JsonElement element) {
+        for (Module module : getModules()) {
+            module.fromJson(element.getAsJsonObject().get(module.getName()));
+        }
+    }
+
+    @Override
+    public String getFileName() {
+        return "modules.json";
     }
 }
